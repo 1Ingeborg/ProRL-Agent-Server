@@ -5,9 +5,9 @@ gateway:
     inference:
       base_url: ${MODEL_BASE_URL}
       engine: ${INFERENCE_ENGINE}
-    max_init_workers: 2
-    max_postrun_workers: 1
-    max_run_workers: 8
+    max_init_workers: 16
+    max_postrun_workers: 8
+    max_run_workers: 96
     model_served: ${MODEL_NAME}
     port: 8100
     public_url: http://127.0.0.1:8100

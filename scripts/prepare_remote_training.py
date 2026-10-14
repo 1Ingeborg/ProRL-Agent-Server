@@ -15,7 +15,8 @@ def main():
         save(CONFIG/"test-specs"/(key+".json"),{k:task[k] for k in ["instance_id","FAIL_TO_PASS","PASS_TO_PASS"]})
         payload=build_task(task,batch="rl").model_dump(mode="json")
         payload["metadata"]["dataset_split"]=task["split"]
-        payload["agent"]["settings"].update(call_limit=8,max_input_tokens=12288,max_output_tokens=1024,temperature=0.7)
+        # 73000 input + 8192 output stays under the 81920-token per-sample training cap.
+        payload["agent"]["settings"].update(call_limit=80,max_input_tokens=73000,max_output_tokens=8192,temperature=0.7)
         # Template data includes no reference repair or bug injection patch.
         assert "patch" not in payload["metadata"]
         outputs["train" if task["split"]=="train" else "val"].append({

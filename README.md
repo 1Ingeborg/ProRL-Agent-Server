@@ -58,22 +58,30 @@ cp config/remote-tunnel.example.json config/remote-tunnel.json
 python scripts/remote_tunnel.py start           # 到训练端的 SSH 隧道（不会自动重连）
 ```
 
-**训练端**
+**训练端：300 条数据 demo**
+
+`config/full300-8a800.env.example` 用 `train.jsonl` 里的全部 300 题跑一个 epoch：每轮 12 题、每题采样 8 次、共 25 轮。训练前先做一次基线验证，之后在第 7、14、21、25 轮后各验证一次并保存模型。
 
 ```bash
-bash scripts/autodl_train.sh convert            # 只需一次：HF 权重 → torch_dist
-cp config/half144-8a800.env.example config/full300-6a800.env
-RUN_ID=$(date +%Y%m%dT%H%M%S)-run bash scripts/autodl_train_full.sh plan    # 查看完整命令
-RUN_ID=...                       bash scripts/autodl_train_full.sh start
+bash scripts/autodl_train.sh convert                                  # 只需一次：HF 权重 → torch_dist
+cp config/full300-8a800.env.example config/full300-8a800.env
+bash scripts/autodl_train_full.sh plan                                # 打印完整的 train.py 命令
+RUN_ID=$(date +%Y%m%dT%H%M%S)-full300 bash scripts/autodl_train_full.sh start
+bash scripts/autodl_train.sh status                                   # stop 用来停止
 ```
 
-每次启动都要用新的 `RUN_ID`，因为任务 ID 由它生成，复用会在 rollout 服务上冲突。日志在 `runs/training/<RUN_ID>/job.readable.log`，TensorBoard 日志在 `runs/tensorboard/<RUN_ID>`。
+启动前会做预检：GPU 数量、数据的 sha256 与 `manifest.json` 是否一致、full300 是否正好覆盖 300 题、reference 权重是否已转换、磁盘空间是否足够、rollout 服务（`127.0.0.1:18080/health`）是否可达。
 
-**checkpoint**：每次验证结束后，在 rollout 端运行 `scripts/pull_checkpoints.sh <RUN_ID> <最后一个 iter>`，把这一轮的模型拉过去。
+每次启动都要换一个新的 `RUN_ID`，因为任务 ID 由它生成，复用会在 rollout 服务上冲突。日志在 `runs/training/<RUN_ID>/job.readable.log`，TensorBoard 日志在 `runs/tensorboard/<RUN_ID>`。验证集的 pass@1 是日志中 `eval <N>:` 那行里的 `polar/eval/resolved_rate`。
 
-## 主要配置（`config/half144-8a800.env.example`）
+在 8×A800 上，每轮 rollout 约 15 分钟，加上训练每轮约 37 分钟，加上 5 次验证，跑完一个 epoch 大约需要 16–17 小时。
+
+**checkpoint**：在 rollout 端运行 `scripts/pull_checkpoints.sh <RUN_ID> 24`。它会在每次验证结束后，把对应的 `iter_N` 拉过来并做校验；校验通过后删除训练端的副本，最后一份（iter 24）两边都保留。
+
+## 主要配置
 
 - 8 卡 colocate，TP2 CP4；每轮 12 题 × 8 采样，GRPO，lr 1e-6，KL 0.001。
 - `MAX_TOKENS_PER_GPU × CP` 是单条轨迹的长度上限，超过的轨迹会被丢弃；`POLAR_MIN_COMPLETE_ACCEPT_FRACTION` 规定每组至少要保留的比例。
 - 验证集每题采样 1 次算 pass@1（`polar/eval/resolved_rate`），每隔 `EVAL_INTERVAL` 轮验证并保存一次；epoch 结束时一定会验证。
-- agent：最多 80 次调用，单次输出 8k token，单次工具输出截断到 2 万字符。
+- agent（由 `prepare_remote_training.py` 写入每条数据）：最多 80 次调用，上下文最多 73k token、单次输出 8k token（两者相加不超过 81920 的单条样本上限），单次工具输出截断到 2 万字符。
+- rollout 端（`config/topology.template.yaml`）：最多 96 个 agent 同时运行，正好是一轮的 12 × 8 条采样。
