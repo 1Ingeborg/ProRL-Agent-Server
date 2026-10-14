@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Export Slime prompts referencing execution-host-only native Polar assets."""
+"""Generate datasets/slime/{train,val,smoke}.jsonl (Polar task specs) from data/."""
 import hashlib, json, os, sys
 from pathlib import Path
 ROOT=Path(os.environ.get("POLAR_HOME",str(Path(__file__).resolve().parents[1])))
 sys.path.insert(0,str(ROOT/"adapters"))
-from covered_dataset import load_covered
+from swesmith_dataset import DATA, load_tasks
 from swe_agent_tasks import build_task, save, select, CONFIG, digest
 def main():
-    tasks,manifest,_=load_covered()
+    tasks=load_tasks()
     (CONFIG/"hidden-eval").mkdir(parents=True,exist_ok=True)
     outputs={"train":[],"val":[]}
     for task in tasks:
@@ -29,8 +29,8 @@ def main():
     outputs["smoke"]=[row for row in outputs["train"] if row["metadata"]["instance_id"] in first]
     assert len(outputs["smoke"])==2
     directory=ROOT/"datasets/slime"; directory.mkdir(parents=True,exist_ok=True)
-    report={"source_datasets":{k:{"rows":v["rows"],"sha256":v["sha256"]} for k,v in manifest["datasets"].items()},
-            "image_count":len(manifest["images"]),"files":{},"reference_patches_exported":False}
+    report={"source_datasets":{n:hashlib.sha256((DATA/n).read_bytes()).hexdigest() for n in ["train.jsonl","val.jsonl"]},
+            "image_count":len({t["image"] for t in tasks}),"files":{}}
     for name,rows in outputs.items():
         raw=("".join(json.dumps(row,ensure_ascii=False)+"\n" for row in rows)).encode()
         path=directory/(name+".jsonl"); temp=path.with_suffix(".tmp");temp.write_bytes(raw);temp.replace(path)

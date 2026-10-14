@@ -1,9 +1,8 @@
-"""Build native Polar requests from frozen training tasks and existing images."""
+"""Build native Polar task requests for SWE-smith tasks."""
 import os
 import hashlib, json, shlex
 from pathlib import Path
 from polar.rollout.models import TaskRequest
-from covered_dataset import load_covered
 
 ROOT = Path(os.environ.get("POLAR_HOME", str(Path(__file__).resolve().parents[1])))
 CONFIG = ROOT / "config/swe-agent"
@@ -69,7 +68,7 @@ def build_task(task, model="Qwen/Qwen3.5-4B", batch="pilot", offline=False):
         "instruction": task["problem_statement"],
         "num_samples": 1, "timeout_seconds": 7200,
         "runtime": {"backend": "docker", "import_path": "swe_agent_runtime:SWEAgentDockerRuntime",
-            "image": task["image"]["image_id"],
+            "image": task["image"],
             "network": "none", "allow_internet": False, "gpus": 0,
             "cpus": 1, "memory_mb": 3072, "workdir": "/testbed",
             "kwargs": {"volumes": volumes}, "env": env,
@@ -93,30 +92,6 @@ def build_task(task, model="Qwen/Qwen3.5-4B", batch="pilot", offline=False):
                 "exclude_patterns": ["tests/**", "**/tests/**", "test_*.py", "**/test_*.py",
                                      "conftest.py", "**/conftest.py"]}},
         "metadata": {"instance_id": task["instance_id"], "dataset_split": "train",
-                     "repo": task["repo"], "image_id": task["image"]["image_id"]}
+                     "repo": task["repo"], "image": task["image"]}
     }
     return TaskRequest.model_validate(payload)
-
-def prepare():
-    tasks, manifest, evidence = load_covered()
-    (CONFIG / "hidden-eval").mkdir(parents=True, exist_ok=True)
-    chosen = select(tasks)
-    out = {"schema_version": 1, "selection": "fewest tests, shortest problem, instance_id; distinct repos",
-           "model_calls": False, "tasks": [], "datasets": {
-               k: {"sha256": v["sha256"], "rows": v["rows"]}
-               for k, v in manifest["datasets"].items()}}
-    for task in chosen:
-        key = digest(task["instance_id"].encode())[:12]
-        spec = {k: task[k] for k in ["instance_id", "FAIL_TO_PASS", "PASS_TO_PASS"]}
-        save(CONFIG / "test-specs" / (key + ".json"), spec)
-        request = build_task(task)
-        path = CONFIG / "tasks" / (key + ".json")
-        save(path, request.model_dump(mode="json"))
-        out["tasks"].append({
-            "instance_id": task["instance_id"], "repo": task["repo"],
-            "image_id": task["image"]["image_id"], "digest": task["image"]["digest"],
-            "request_path": str(path), "f2p": len(task["FAIL_TO_PASS"]),
-            "p2p": len(task["PASS_TO_PASS"]), "verification": evidence[task["instance_id"]]["status"]
-        })
-    save(CONFIG / "pilot.json", out)
-    return chosen, out

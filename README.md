@@ -19,6 +19,7 @@ adapters/           SWE-agent 接入：harness / runtime / runner / gateway brid
 examples/swegym_slime_grpo/   Qwen3.5-4B 的 Megatron 参数与 HF → torch_dist 权重转换
 scripts/            启动脚本、服务管理、隧道、slime/SGLang 补丁、checkpoint 拉取
 config/             拓扑模板与训练配置示例
+data/               SWE-smith 任务：train.jsonl 300 条、val.jsonl 50 条（39 个仓库，两者无重叠）
 ```
 
 ## 依赖版本
@@ -32,7 +33,12 @@ config/             拓扑模板与训练配置示例
 | transformers / TE / FLA / mbridge | 5.8.1 / 2.10.0 / 0.5.0 / 0.15.1 |
 | ray / torch_memory_saver | 2.59.0 / 0.0.10 |
 
-rollout 端另外需要 [SWE-agent](https://github.com/SWE-agent/SWE-agent) 1.1.0 源码（`repos/SWE-agent`）以及 SWE-smith 任务的 Docker 镜像。
+rollout 端另外需要：
+
+- `conda/polar`：安装本仓库（`pip install -e .`）的环境，用来运行 rollout/gateway 服务；
+- `conda/swe` + `repos/SWE-agent`：[SWE-agent](https://github.com/SWE-agent/SWE-agent) 1.1.0 源码和它的 Python 环境，会以只读方式挂载进任务容器；
+- `config/tokenizer`：Qwen3.5-4B 的 `tokenizer.json`、`tokenizer_config.json`、`chat_template.jinja`，agent 用它精确统计 token 数；
+- 39 个 SWE-smith 镜像 `swebench/swesmith.x86_64.<repo>:latest`，镜像名可以从 `data/*.jsonl` 的 `image_name` 推出来（把 `jyangballin/` 换成 `swebench/`）。
 
 slime 和 Megatron 放在 `repos/slime`、`repos/Megatron-LM`，安装后执行一次：
 
@@ -44,7 +50,17 @@ SLIME_DIR=repos/slime bash scripts/patch/patch_slime_training_fixes.sh
 
 ## 数据
 
-`scripts/prepare_remote_training.py` 根据 SWE-smith 任务生成 `datasets/slime/{train,val}.jsonl` 和 `manifest.json`。每一行是一个 Polar 任务 spec，指定 runtime、agent、evaluator。
+`data/` 里放的是 350 个 SWE-smith 任务（来自 Agent Lightning 的 coding-agent 示例），每条包含 `problem_statement`、`repo`、`image_name`、`FAIL_TO_PASS`、`PASS_TO_PASS`。
+
+在 **rollout 端** 生成训练用的任务 spec，再把它复制到训练端：
+
+```bash
+POLAR_HOME=$PWD conda/polar/bin/python scripts/prepare_remote_training.py
+# 生成 datasets/slime/{train,val,smoke}.jsonl、manifest.json，以及 config/swe-agent/test-specs/
+scp -r datasets/slime <训练端>:<训练端 POLAR_HOME>/datasets/
+```
+
+每一行是一个 Polar 任务 spec，指定 runtime（镜像、准备步骤）、agent（80 次调用等限制）、evaluator（用 FAIL_TO_PASS + PASS_TO_PASS 判分）。spec 里的路径都是 rollout 端的绝对路径，所以必须在 rollout 端生成。训练端启动前会用 `manifest.json` 校验数据的 sha256。
 
 ## 运行
 
