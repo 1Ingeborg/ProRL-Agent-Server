@@ -1,0 +1,7 @@
+{
+  "host": "",
+  "port": 0,
+  "user": "root",
+  "identity_file": "/data/ProRL-Agent-Serve/.secrets/tunnel_ed25519",
+  "known_hosts": "/data/ProRL-Agent-Serve/.secrets/autodl_known_hosts"
+}
